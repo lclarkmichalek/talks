@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"net/http"
 	"os"
@@ -22,7 +23,12 @@ func main() {
 	flag.Set("logtostderr", "true")
 	flag.Parse()
 
-	err := http.ListenAndServe(":4003", http.HandlerFunc(handler))
+	srv := &http.Server{
+		Handler:      http.HandlerFunc(handler),
+		Addr:         ":4003",
+		TLSNextProto: map[string]func(*http.Server, *tls.Conn, http.Handler){},
+	}
+	err := srv.ListenAndServeTLS("cert.pem", "key.pem")
 	if err != nil {
 		glog.Errorf("failed to listen and serve: %v", err)
 		os.Exit(1)
