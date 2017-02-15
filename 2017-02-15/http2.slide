@@ -1,0 +1,228 @@
+HTTP 2 Server Push in go1.8
+15 February 2017
+Tags: http2
+
+Laurie Clark-Michalek
+Infrastructure Engineer, Qubit
+lclarkmichalek@{gmail,qubit}.com
+
+* Aims
+
+- What is HTTP2
+- What is HTTP2 Server Push
+- How can we use HTTP2 Server Push in Go
+- Potential hicups or issues
+
+* HTTP 1.0
+
+- Well this seems to work
+
+* HTTP 1.1
+
+- Host headers (mandatory)
+- Persistent connections
+- Many many features
+- Pipelining (kinda)
+
+* HTTP 2
+
+- Mandatory pipelining
+- Header compression
+- "Bidirectional communication"
+
+* HTTP 2 - Server Push
+
+- Initiated by the server
+- Optimisation
+- 'Preloads' a response
+- Race conditions!
+
+* HTTP 2 - Server Push
+
+- Not websockets
+- Not server sent events
+- No Javascript API to recieve
+
+* In Go 1.8
+
+ import (
+   "net/http"
+   "log"
+  )
+
+ func handler(w http.ResponseWriter, r *http.Request) {
+   if p, ok := w.(http.Pusher); ok {
+     err := p.Push("/img/foo.png", nil)
+     if err != nil {
+       log.Errorf("could not push /foo: %v", err)
+     }
+   }
+   w.Write([]byte(`
+   <html>
+   <img src="/foo"/>
+   </html>`))
+ }
+
+: Brad Fitz
+: Tom Bergan
+: PushOptions - Method, Headers
+: Demo 1
+
+* HTTPS
+
+- Technically not required
+- Lots of arguments
+- ...
+- Basically required
+
+: Demo 2
+: Add sleep
+
+* 'Real World' impact
+
+- Intercontinental request
+- RTT >100ms
+- Loading lots of assets
+- A real page
+
+: enable https
+: make deploy
+: enable push
+: sync assets
+: css
+: loading bars
+: make deploy
+
+* Middlewares
+
+- Push before expensive middleware
+
+  func pushPaths(next http.Handler, paths ...string) http.Handler {
+    return func(w http.ResponseWriter, r *http.Request) {
+      if pusher, ok := w.(http.Pusher); ok {
+        for _, path := range paths {
+          err := pusher.Push(path, nil)
+          if err != nil {
+            break
+          }
+        }
+      }
+      next(w, r)
+    }
+  }
+
+  func main() {
+    ...
+    http.Get("/", pushPaths(expensiveAuthentication(indexHandler), "/logo.png"))
+    ...
+  }
+
+* Middlewares
+
+- Wrapping response writers are an issue
+
+  func handler(w http.ResponseWriter, r *http.Request) {
+    if _, ok := w.(http.Pusher); ok {
+      glog.Errorf("%T is not a pusher", w)
+    }
+  }
+
+  func main() {
+    ...
+    handler = prometheus.InstrumentHandlerFunc("handler", handler)
+    ...
+  }
+
+: Demo 5
+: https://github.com/prometheus/client_golang/blob/9fdd167dba95521df41c4e5f75907cdcf8e41c50/prometheus/http.go
+
+* ResponseWriter interfaces
+
+- http.Pusher
+- http.CloseNotifier
+- http.Flusher
+- http.Hijacker
+- io.ReaderFrom
+
+* HTTP 1.1 ResponseWriter interfaces
+
+- http.Pusher
+- *http.CloseNotifier*
+- *http.Flusher*
+- *http.Hijacker*
+- *io.ReaderFrom*
+
+* HTTP 2 ResponseWriter interfaces
+
+- *http.Pusher*
+- *http.CloseNotifier*
+- *http.Flusher*
+- http.Hijacker
+- io.ReaderFrom
+
+* Complicated fixes
+
+  type http2Wrapper struct { inner http.ResponseWriter }
+  func (h2 *http2Wrapper) Push(pth string, opts *http.PushOptions) error {...}
+  func (h2 *http2Wrapper) CloseNotify() <-chan bool { ... }
+  func (h2 *http2Wrapper) Flush() { ... }
+
+  type httpWrapper struct { inner http.ResponseWriter }
+  func (h *httpWrapper) CloseNotify() <-chan bool { ... }
+  func (h *httpWrapper) Flush() { ... }
+  func (h *httpWrapper) Hijack() (net.Conn, *bufio.ReadWriter, error) { ... }
+  func (h *httpWrapper) ReadFrom(r Reader) (n int64, err error) { ... }
+
+  func wrap(w http.ResponseWriter) http.ResponseWriter {
+    _, psh := w.(http.Pusher)
+    _, cn := w.(http.CloseNotifier)
+    ....
+
+    if psh && cn && fl {
+      return &http2Wrapper{w}
+    } else if cn && fl && hj && rf {
+      return &httpWrapper{w}
+    } else {
+      ??
+    }
+  }
+
+* Simple fixes
+
+  type pushingWrapper struct {
+    inner http.ResponseWrapper
+  }
+
+  func (pw *pushingWrapper) Push(pth string, opts *http.PushOptions) error {
+    if psh, ok := pw.inner.(http.Pusher); ok {
+      return psh.Push(pth, opts)
+    } else {
+      return http.ErrNotSupported
+    }
+  }
+
+* Scalable(?) fixes
+
+  type unwrapper interface {
+    Unwrap() http.ResponseWriter
+  }
+
+  func push(w http.ResponseWriter, pth string, opts *http.PushOptions) error {
+    for w != nil {
+      if pusher, ok := w.(http.Pusher); ok {
+        return pusher.Push(pth, opts)
+      }
+      if uw, ok := w.(unwrapper); ok {
+        w = uw.Unwrap()
+      } else {
+        break
+      }
+    }
+    return http.ErrNotSupported
+  }
+
+* Resources
+
+- "Rules of Thumb for HTTP/2 Push"
+- github.com/golang/go #13443
+- github.com/golang/net
