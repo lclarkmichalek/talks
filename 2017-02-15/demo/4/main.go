@@ -9,7 +9,11 @@ import (
 	"github.com/golang/glog"
 )
 
-var pushPaths = []string{}
+var pushPaths = []string{
+	"/kn8_files/css",
+	"/kn8_files/common.js",
+	"/kn8_files/main.js",
+}
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/" {

@@ -13,9 +13,18 @@ lclarkmichalek@{gmail,qubit}.com
 - How can we use HTTP2 Server Push in Go
 - Potential hicups or issues
 
+* HTTP 0.9
+
+- GET
+- HTML responses
+- Port 80
+
 * HTTP 1.0
 
-- Well this seems to work
+- HEAD
+- POST
+- Status Codes
+- `message/http`
 
 * HTTP 1.1
 

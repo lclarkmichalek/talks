@@ -28,7 +28,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		} else {
-			glog.Infof("not a pusher")
+			glog.Infof("%T is not a pusher", w)
 		}
 		time.Sleep(330 * time.Millisecond)
 	}
