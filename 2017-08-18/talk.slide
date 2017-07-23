@@ -1,0 +1,168 @@
+A worked example of monitoring a queue based application
+18th August 2017
+
+Laurie Clark-Michalek
+lclarkmichalek@gmail.com
+
+* Aims
+
+- Dull
+- Simple
+- Tedious
+
+* Example: Stash Deferred
+
+Send a message with a timestamp, be sent that message at or after that timestamp
+
+1. Read from Bigtable
+2. Write to Kinesis
+3. Delete from Bigtable
+
+.image ./imgs/simple.png
+
+* Example: Delayed
+
+1. Read from MySQL
+2. Write to PubSub
+3. Delete from MySQL
+
+.image ./imgs/simple-2.png
+
+* Basics
+
+- Success count
+- Failure count
+- Duration
+
+* Metrics
+
+  # HELP delayed_mysql_message_read_total count of mysql messages read, tagged by result
+  # TYPE delayed_mysql_message_read_total counter
+  delayed_mysql_message_read_total{result="failure"} 42
+  delayed_mysql_message_read_total{result="success"} 7130
+
+  # HELP delayed_mysql_message_read_duration_seconds duration of mysql read operations
+  # TYPE delayed_mysql_message_read_duration_seconds histogram
+  delayed_mysql_message_read_duration_seconds_bucket{le="0.1"} 7172
+  delayed_mysql_message_read_duration_seconds_bucket{le="0.316227766016838"} 7172
+  delayed_mysql_message_read_duration_seconds_bucket{le="1.0000000000000002"} 7172
+  delayed_mysql_message_read_duration_seconds_bucket{le="3.1622776601683804"} 7172
+  delayed_mysql_message_read_duration_seconds_bucket{le="10.000000000000004"} 7172
+  delayed_mysql_message_read_duration_seconds_bucket{le="31.622776601683807"} 7172
+  delayed_mysql_message_read_duration_seconds_bucket{le="+Inf"} 7172
+  delayed_mysql_message_read_duration_seconds_sum 7.8916206160000035
+  delayed_mysql_message_read_duration_seconds_count 7172
+
+* Rates
+
+  sum(rate(delayed_mysql_message_read_total[1m])) by (result)
+
+.image ./imgs/read-rate-by-result.png 300 1000
+
+* Quantiles
+
+  histogram_quantile(0.5, sum(rate(delayed_mysql_message_read_duration_seconds_bucket[1m])) by (le))
+  histogram_quantile(0.9, sum(rate(delayed_mysql_message_read_duration_buckets[1m])) by (le))
+  histogram_quantile(0.99, sum(rate(delayed_mysql_message_read_duration_buckets[1m])) by (le))
+
+.image ./imgs/latency.png 300 1000
+
+* Backpressure
+
+  go func() {
+    for {
+      msg := readFromMySQL()
+      started := time.Now()
+      writerChan <- msg
+      delayedBackpressure.Observe(time.Since(started).Seconds())
+    }
+  }
+
+  # HELP delayed_mysql_read_backpressure_seconds backpressure on the channel out
+  # of the mysql read
+  # TYPE delayed_mysql_read_backpressure_seconds histogram
+  delayed_mysql_read_backpressure_seconds_bucket{le="0.01"} 7172
+  delayed_mysql_read_backpressure_seconds_bucket{le="0.031622776601683"} 7172
+  delayed_mysql_read_backpressure_seconds_bucket{le="0.1"} 7172
+  delayed_mysql_read_backpressure_seconds_bucket{le="0.316227766016838"} 7172
+  delayed_mysql_read_backpressure_seconds_bucket{le="1.0000000000000002"} 7172
+  delayed_mysql_read_backpressure_seconds_bucket{le="+Inf"} 7172
+  delayed_mysql_read_backpressure_seconds_sum 0.78916206160000035
+  delayed_mysql_read_backpressure_seconds_count 7172
+
+* Backpressure
+
+  histogram_quantile(0.5, sum(rate(delayed_mysql_read_backpressure_seconds_bucket[1m])) by (le))
+  histogram_quantile(0.9, sum(rate(delayed_mysql_read_backpressure_buckets[1m])) by (le))
+  histogram_quantile(0.99, sum(rate(delayed_mysql_read_backpressure_buckets[1m])) by (le))
+
+.image ./imgs/backpressure.png 300 1000
+
+* Lag
+
+  go func() {
+    for range time.NewTicker(10 * time.Second).C {
+      send(&Message{Due: time.Now(), Data: time.Now()})
+    }
+  }()
+
+  go func() {
+    for {
+      msg := read()
+      delayedLagSeconds.Set(time.Since(msg.Data))
+    }
+  }()
+
+  # HELP delayed_lag_seconds seconds of lag on the last tracer message
+  # TYPE delayed_lag_seconds gauge
+  delayed_lag_seconds 10
+
+* Lag #2
+
+  go func() {
+    t := time.NewTicker(10 * time.Second)
+    for {
+      <-t.C
+      send(&Message{Due: time.Now(), Data: time.Now()})
+    }
+  }()
+
+  go func() {
+    for {
+      msg := read()
+      lastReceivedEpochSeconds.Set(msg.Data)
+    }
+  }()
+
+  # HELP delayed_tracer_last_received_epoch_seconds timestamp that the last
+  # received tracer message was sent
+  # TYPE delayed_tracer_last_received_epoch_seconds gauge
+  delayed_tracer_last_received_epoch_seconds 1500477291
+
+  delayed_lag_seconds = time() - delayed_tracer_last_received_epoch_seconds
+
+* Lag #2
+
+.image ./imgs/lag.png 300 1000
+
+* Lag as an SLI
+
+  sli:delayed_lag:threshold = delayed_lag_seconds < bool 60
+
+.image ./imgs/lag-threshold.png 300 1000
+
+* Lag as an SLI
+
+  sli:delayed_lag:avg30d = avg_over_time(sli:delayed_lag:threshold[30d])
+
+.image ./imgs/lag-percentage.png 300 1000
+
+* Alerting
+
+  ALERT
+    IF delayed_lag_seconds > 60
+    FOR 5m
+    ANNOTATIONS {
+      description = "delayed messages had lag of {{ $value }}",
+      dashboard_url = "https://grafana.foo.com/dashboard/db/delayed",
+    }
