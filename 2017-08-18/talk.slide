@@ -43,12 +43,13 @@ Send a message with a timestamp, be sent that message at or after that timestamp
 
   # HELP delayed_mysql_message_read_duration_seconds duration of mysql read operations
   # TYPE delayed_mysql_message_read_duration_seconds histogram
+  delayed_mysql_message_read_duration_seconds_bucket{le="0.01"} 7172
+  delayed_mysql_message_read_duration_seconds_bucket{le="0.0316227766016838"} 7172
   delayed_mysql_message_read_duration_seconds_bucket{le="0.1"} 7172
   delayed_mysql_message_read_duration_seconds_bucket{le="0.316227766016838"} 7172
   delayed_mysql_message_read_duration_seconds_bucket{le="1.0000000000000002"} 7172
   delayed_mysql_message_read_duration_seconds_bucket{le="3.1622776601683804"} 7172
   delayed_mysql_message_read_duration_seconds_bucket{le="10.000000000000004"} 7172
-  delayed_mysql_message_read_duration_seconds_bucket{le="31.622776601683807"} 7172
   delayed_mysql_message_read_duration_seconds_bucket{le="+Inf"} 7172
   delayed_mysql_message_read_duration_seconds_sum 7.8916206160000035
   delayed_mysql_message_read_duration_seconds_count 7172
@@ -81,6 +82,8 @@ Send a message with a timestamp, be sent that message at or after that timestamp
   # HELP delayed_mysql_read_backpressure_seconds backpressure on the channel out
   # of the mysql read
   # TYPE delayed_mysql_read_backpressure_seconds histogram
+  delayed_mysql_read_backpressure_seconds_bucket{le="0.001"} 7172
+  delayed_mysql_read_backpressure_seconds_bucket{le="0.0031622776601683"} 7172
   delayed_mysql_read_backpressure_seconds_bucket{le="0.01"} 7172
   delayed_mysql_read_backpressure_seconds_bucket{le="0.031622776601683"} 7172
   delayed_mysql_read_backpressure_seconds_bucket{le="0.1"} 7172
@@ -166,3 +169,28 @@ Send a message with a timestamp, be sent that message at or after that timestamp
       description = "delayed messages had lag of {{ $value }}",
       dashboard_url = "https://grafana.foo.com/dashboard/db/delayed",
     }
+
+* Diagrams!
+
+.link https://grafana.com/plugins/jdbranham-diagram-panel http://lmgtfy.com/?q=grafana+diagram+plugin
+
+.image ./imgs/diagram.png
+
+* Diagrams
+
+  graph TB;
+    M[MySQL] ==> A[MySQL Reader]
+    B ==> P[PubSub]
+    C ==> M
+
+    subgraph delayed
+    A --> AE(Error)
+    A ==> B
+    B[PubSub Writer] --> BE(Error)
+    B ==> C[MySQL Deleter]
+    C --> CE(Error)
+    end
+
+* Fin
+
+.link ./imgs/dashboard.png click me
